@@ -58,7 +58,12 @@ class Residualizer(object):
             M0_t = M_t - M_t.mean(1, keepdim=True)
         else:
             M0_t = M_t
-        return M_t - torch.mm(torch.mm(M0_t, self.Q_t), self.Q_t.t())  # keep original mean
+        tmp = torch.mm(M0_t, self.Q_t)
+        del M0_t
+        torch.cuda.empty_cache()
+        tmp = torch.mm(tmp, self.Q_t.t())
+        torch.cuda.empty_cache()
+        return M_t - tmp  # keep original mean
 
 
 def calculate_maf(genotype_t, alleles=2):
