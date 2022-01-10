@@ -6,6 +6,7 @@ from datetime import datetime
 import sys
 import os
 import argparse
+import pickle
 
 sys.path.insert(1, os.path.dirname(__file__))
 from core import *
@@ -13,6 +14,7 @@ from post import *
 import genotypeio
 import cis
 import trans
+import susie
 
 
 def main():
@@ -20,7 +22,7 @@ def main():
     parser.add_argument('genotype_path', help='Genotypes in PLINK format')
     parser.add_argument('phenotype_bed', help='Phenotypes in BED format')
     parser.add_argument('prefix', help='Prefix for output file names')
-    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'trans'], help='Mapping mode. Default: cis')
+    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'trans', 'susie'], help='Mapping mode. Default: cis')
     parser.add_argument('--covariates', default=None, help='Covariates file, tab-delimited, covariates x samples')
     parser.add_argument('--permutations', type=int, default=10000, help='Number of permutations. Default: 10000')
     parser.add_argument('--interaction', default=None, type=str, help='Interaction term')
@@ -34,6 +36,8 @@ def main():
     parser.add_argument('--return_r2', action='store_true', help='Return r2 (only for sparse trans-QTL output)')
     parser.add_argument('--best_only', action='store_true', help='Only write lead association for each phenotype (interaction mode only)')
     parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL mode only)')
+    parser.add_argument('--summary_only', action='store_true', default=False, help='Only output ')
+    parser.add_argument('--L', default=10, type=int, help='SuSie L parameter (susie mode only)')
     parser.add_argument('--batch_size', type=int, default=20000, help='Batch size. Reduce this if encountering OOM errors.')
     parser.add_argument('--load_split', action='store_true', help='Load genotypes into memory separately for each chromosome.')
     parser.add_argument('--fdr', default=0.05, type=np.float64, help='FDR for cis-QTLs')
@@ -168,6 +172,17 @@ def main():
         else:
             out_file = os.path.join(args.output_dir, args.prefix+'.trans_qtl_pairs.txt.gz')
             pairs_df.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
+    elif args.mode == 'susie':
+        res = susie.map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
+                        L=args.L, maf_threshold=maf_threshold, logger=logger, summary_only=args.summary_only)
+        logger.write('  * writing output')
+        if not args.summary_only:
+            out_file = os.path.join(args.output_dir, args.prefix+'.susie.pickle')
+            with open(out_file, 'wb') as f:
+                pickle.dump(res, f)
+        else:
+            out_file = os.path.join(args.output_dir, args.prefix+'.susie.txt.gz')
+            res.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
 
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Finished mapping')
 
