@@ -68,6 +68,7 @@ def init_setup(n, p, L, scaled_prior_variance, varY, residual_variance=None,
         'Xr': torch.zeros(n).to(device),
         'KL': torch.full([L], np.NaN).to(device),
         'lbf': torch.full([L], np.NaN).to(device),
+        'lbf_variable': torch.full((L,p), np.NaN).to(device),
         'sigma2': residual_variance,
         'V': scaled_prior_variance * varY,
         'pi': prior_weights,
@@ -275,6 +276,7 @@ def update_each_effect(X_t, xattr, Y_t, s, estimate_prior_variance=False,
         s['alpha'][l] = res['alpha']
         s['mu2'][l] = res['mu2']
         s['V'][l] = res['V']
+        s['lbf_variable'][l] = res['lbf']
         s['lbf'][l] = res['lbf_model']
         s['KL'][l] = -res['loglik'] + SER_posterior_e_loglik(X_t, xattr, R_t, s['sigma2'], res['alpha']*res['mu'], res['alpha']*res['mu2'])
         s['Xr'] = s['Xr'] + compute_Xb(X_t, (s['alpha'][l,:] * s['mu'][l,:]), xattr['scaled_center'], xattr['scaled_scale'])
@@ -533,6 +535,8 @@ def susie(X_t, y_t, L=10, scaled_prior_variance=0.2,
     # if track_fit:
     #     s['trace'] = tracking
 
+    s['lbf_variable'] = s['lbf_variable'].cpu().numpy()
+
     # SuSiE CS and PIP
     if coverage is not None and min_abs_corr is not None:
         s['sets'] = susie_get_cs(s, coverage=coverage, X=X_t, min_abs_corr=min_abs_corr)
@@ -574,7 +578,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
 
     start_time = time.time()
     logger.write('  * fine-mapping')
-    copy_keys = ['pip', 'sets', 'converged', 'niter']
+    copy_keys = ['pip', 'sets', 'converged', 'niter', 'lbf_variable']
     if not summary_only:
         susie_res = {}
     else:
