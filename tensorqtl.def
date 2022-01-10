@@ -26,7 +26,10 @@ IncludeCmd: yes
             liblzma-dev \
             libncurses5-dev \
             libssl-dev \
-            python3 \
+            python3.8 \
+            python3.8-dev \
+            python3.8-distutils \
+            python3.8-venv \
             python3-pip \
             sudo \
             unzip \
@@ -37,6 +40,8 @@ IncludeCmd: yes
     apt-get clean && \
     apt-get autoremove -y && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+    python3.8 -m pip install pip
 
     # htslib
     cd /opt && \
@@ -68,12 +73,16 @@ IncludeCmd: yes
     Rscript -e 'if (!requireNamespace("BiocManager", quietly = TRUE)) {install.packages("BiocManager")}; BiocManager::install("qvalue");'
 
     # python modules
-    pip3 install --upgrade pip setuptools
-    pip3 install numpy pandas scipy
-    pip3 install pandas-plink ipython jupyter matplotlib pyarrow torch rpy2 gcsfs
+    python3.8 -m pip install --upgrade pip setuptools
+    python3.8 -m pip install numpy pandas scipy
+    python3.8 -m pip install pandas-plink ipython jupyter matplotlib pyarrow torch rpy2 gcsfs
 
     cd /opt && \
         git clone https://github.com/porchard/tensorqtl.git && \
         chmod a+rx tensorqtl && \
         cd tensorqtl && \
-        pip install -r install/requirements.txt .
+        git checkout test && \
+        python3.8 -m pip install -r install/requirements.txt .
+
+    python3.8 -m pip cache purge
+    apt-get clean
