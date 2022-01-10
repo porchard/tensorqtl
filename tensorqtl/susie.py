@@ -579,10 +579,9 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
     start_time = time.time()
     logger.write('  * fine-mapping')
     copy_keys = ['pip', 'sets', 'converged', 'niter', 'lbf_variable']
-    if not summary_only:
-        susie_res = {}
-    else:
-        susie_res = []
+    susie_res = {} # this will only be populated if not summary_only
+    susie_summary = [] # this will always be populated
+
     for k, (phenotype, genotypes, genotype_range, phenotype_id) in enumerate(igc.generate_data(verbose=verbose), 1):
         # copy genotypes to GPU
         genotypes_t = torch.tensor(genotypes, dtype=torch.float).to(device)
@@ -623,24 +622,24 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
         res['pip'] = pd.DataFrame({'pip':res['pip'], 'af':af_t.cpu().numpy()}, index=variant_ids)
         if not summary_only:
             susie_res[phenotype_id] = {k:res[k] for k in copy_keys}
-        else:
-            if res['sets']['cs'] is not None:
-                # assert res['converged'] == True
-                if res['converged'] == True:
-                    for c in sorted(res['sets']['cs'], key=lambda x: int(x.replace('L',''))):
-                        cs = res['sets']['cs'][c]  # indexes
-                        p = res['pip'].iloc[cs].copy().reset_index()
-                        p['cs_id'] = c.replace('L','')
-                        p.insert(0, 'phenotype_id', phenotype_id)
-                        susie_res.append(p)
-                else:
-                    print(f'    * phenotype ID: {phenotype_id}')
+        # get the summary
+        if res['sets']['cs'] is not None:
+            # assert res['converged'] == True
+            if res['converged'] == True:
+                for c in sorted(res['sets']['cs'], key=lambda x: int(x.replace('L',''))):
+                    cs = res['sets']['cs'][c]  # indexes
+                    p = res['pip'].iloc[cs].copy().reset_index()
+                    p['cs_id'] = c.replace('L','')
+                    p.insert(0, 'phenotype_id', phenotype_id)
+                    susie_summary.append(p)
+            else:
+                print(f'    * phenotype ID: {phenotype_id}')
 
     logger.write(f'  Time elapsed: {(time.time()-start_time)/60:.2f} min')
     logger.write('done.')
-    if summary_only and susie_res:
-        susie_res = pd.concat(susie_res, axis=0).rename(columns={'snp':'variant_id'}).reset_index(drop=True)
-    return susie_res
+    if susie_summary:
+        susie_summary = pd.concat(susie_summary, axis=0).rename(columns={'snp':'variant_id'}).reset_index(drop=True)
+    return susie_summary if summary_only else (susie_res, susie_summary)
 
 
 def get_summary(res_dict, verbose=True):

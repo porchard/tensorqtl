@@ -36,7 +36,7 @@ def main():
     parser.add_argument('--return_r2', action='store_true', help='Return r2 (only for sparse trans-QTL output)')
     parser.add_argument('--best_only', action='store_true', help='Only write lead association for each phenotype (interaction mode only)')
     parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL mode only)')
-    parser.add_argument('--summary_only', action='store_true', default=False, help='Only output ')
+    parser.add_argument('--summary_only', action='store_true', default=False, help='Only output credible sets (susie mode only)')
     parser.add_argument('--L', default=10, type=int, help='SuSie L parameter (susie mode only)')
     parser.add_argument('--batch_size', type=int, default=20000, help='Batch size. Reduce this if encountering OOM errors.')
     parser.add_argument('--load_split', action='store_true', help='Load genotypes into memory separately for each chromosome.')
@@ -177,12 +177,12 @@ def main():
                         L=args.L, maf_threshold=maf_threshold, logger=logger, summary_only=args.summary_only)
         logger.write('  * writing output')
         if not args.summary_only:
-            out_file = os.path.join(args.output_dir, args.prefix+'.susie.pickle')
-            with open(out_file, 'wb') as f:
-                pickle.dump(res, f)
-        else:
-            out_file = os.path.join(args.output_dir, args.prefix+'.susie.txt.gz')
-            res.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
+            full_out_file = os.path.join(args.output_dir, args.prefix+'.susie.pickle')
+            with open(full_out_file, 'wb') as f:
+                pickle.dump(res[0], f)
+        summary = res if args.summary_only else res[1]
+        summary_out_file = os.path.join(args.output_dir, args.prefix+'.susie.txt.gz')
+        summary.to_csv(summary_out_file, sep='\t', index=False, float_format='%.6g')
 
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Finished mapping')
 
