@@ -22,20 +22,20 @@ def main():
     parser.add_argument('genotype_path', help='Genotypes in PLINK format')
     parser.add_argument('phenotype_bed', help='Phenotypes in BED format')
     parser.add_argument('prefix', help='Prefix for output file names')
-    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'trans', 'susie'], help='Mapping mode. Default: cis')
+    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'trans', 'gwas', 'susie'], help='Mapping mode. Default: cis')
     parser.add_argument('--covariates', default=None, help='Covariates file, tab-delimited, covariates x samples')
     parser.add_argument('--permutations', type=int, default=10000, help='Number of permutations. Default: 10000')
     parser.add_argument('--interaction', default=None, type=str, help='Interaction term')
     parser.add_argument('--cis_output', default=None, type=str, help="Output from 'cis' mode with q-values. Required for independent cis-QTL mapping.")
     parser.add_argument('--phenotype_groups', default=None, type=str, help='Phenotype groups. Header-less TSV with two columns: phenotype_id, group_id')
     parser.add_argument('--window', default=1000000, type=np.int32, help='Cis-window size, in bases. Default: 1000000.')
-    parser.add_argument('--pval_threshold', default=None, type=np.float64, help='Output only significant phenotype-variant pairs with a p-value below threshold. Default: 1e-5 for trans-QTL')
+    parser.add_argument('--pval_threshold', default=None, type=np.float64, help='Output only significant phenotype-variant pairs with a p-value below threshold. Default: 1e-5 for trans-QTL / GWAS')
     parser.add_argument('--maf_threshold', default=0, type=np.float64, help='Include only genotypes with minor allele frequency >= maf_threshold. Default: 0')
     parser.add_argument('--maf_threshold_interaction', default=0.05, type=np.float64, help='MAF threshold for interactions, applied to lower and upper half of samples')
-    parser.add_argument('--return_dense', action='store_true', help='Return dense output for trans-QTL.')
-    parser.add_argument('--return_r2', action='store_true', help='Return r2 (only for sparse trans-QTL output)')
+    parser.add_argument('--return_dense', action='store_true', help='Return dense output for trans-QTL / GWAS.')
+    parser.add_argument('--return_r2', action='store_true', help='Return r2 (only for sparse trans-QTL / GWAS output)')
     parser.add_argument('--best_only', action='store_true', help='Only write lead association for each phenotype (interaction mode only)')
-    parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL mode only)')
+    parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL / GWAS mode only)')
     parser.add_argument('--summary_only', action='store_true', default=False, help='Only output credible sets (susie mode only)')
     parser.add_argument('--L', default=10, type=int, help='SuSie L parameter (susie mode only)')
     parser.add_argument('--batch_size', type=int, default=20000, help='Batch size. Reduce this if encountering OOM errors.')
@@ -49,8 +49,8 @@ def main():
     # check inputs
     if args.mode=='cis_independent' and (args.cis_output is None or not os.path.exists(args.cis_output)):
         raise ValueError("Output from 'cis' mode must be provided.")
-    if args.interaction is not None and args.mode not in ['cis_nominal', 'trans']:
-        raise ValueError("Interactions are only supported in 'cis_nominal' or 'trans' mode.")
+    if args.interaction is not None and args.mode not in ['cis_nominal', 'trans', 'gwas']:
+        raise ValueError("Interactions are only supported in 'cis_nominal', 'trans', or 'gwas' mode.")
 
     logger = SimpleLogger(os.path.join(args.output_dir, f'{args.prefix}.tensorQTL.{args.mode}.log'))
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Running TensorQTL: {args.mode.split("_")[0]}-QTL mapping')
@@ -80,7 +80,7 @@ def main():
         interaction_s = None
 
     if args.maf_threshold is None:
-        if args.mode=='trans':
+        if args.mode=='trans' or args.mode=='gwas':
             maf_threshold = 0.05
         else:
             maf_threshold = 0
@@ -171,6 +171,24 @@ def main():
             pairs_df.to_parquet(os.path.join(args.output_dir, args.prefix+'.trans_qtl_pairs.parquet'))
         else:
             out_file = os.path.join(args.output_dir, args.prefix+'.trans_qtl_pairs.txt.gz')
+            pairs_df.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
+    elif args.mode=='gwas':
+        return_sparse = not args.return_dense
+        pval_threshold = args.pval_threshold
+        if pval_threshold is None and return_sparse:
+            pval_threshold = 1e-5
+            logger.write(f'  * p-value threshold: {pval_threshold:.2g}')
+
+        pairs_df = trans.map_trans(genotype_df, phenotype_df, covariates_df, interaction_s=interaction_s,
+                                  return_sparse=return_sparse, pval_threshold=pval_threshold,
+                                  maf_threshold=maf_threshold, batch_size=args.batch_size,
+                                  return_r2=args.return_r2, logger=logger)
+
+        logger.write('  * writing output')
+        if not args.output_text:
+            pairs_df.to_parquet(os.path.join(args.output_dir, args.prefix+'.gwas_pairs.parquet'))
+        else:
+            out_file = os.path.join(args.output_dir, args.prefix+'.gwas_pairs.txt.gz')
             pairs_df.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
     elif args.mode == 'susie':
         res = susie.map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
