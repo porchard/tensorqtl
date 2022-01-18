@@ -260,7 +260,7 @@ def map_trans(genotype_df, phenotype_df, covariates_df=None, interaction_s=None,
                                                              interaction_mask_t=interaction_mask_t,
                                                              maf_threshold_interaction=maf_threshold)
                 res = calculate_interaction_nominal(genotypes_t, phenotypes_t, interaction_t, residualizer,
-                                                    return_sparse=return_sparse)
+                                                    return_sparse=return_sparse, logger=logger)
                 # res: tstat, b, b_se, af, ma_samples, ma_count
                 res = [i.cpu().numpy() for i in res]
                 mask = mask_t.cpu().numpy()

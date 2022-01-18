@@ -51,6 +51,10 @@ class Residualizer(object):
         # center and orthogonalize
         self.Q_t, _ = torch.linalg.qr(C_t - C_t.mean(0))
         self.dof = C_t.shape[0] - 2 - C_t.shape[1]
+        self.C_t = C_t
+
+    def cpu(self):
+        return type(self)(self.C_t.cpu().clone())
 
     def transform(self, M_t, center=True):
         """Residualize rows of M wrt columns of C"""
@@ -60,9 +64,7 @@ class Residualizer(object):
             M0_t = M_t
         tmp = torch.mm(M0_t, self.Q_t)
         del M0_t
-        torch.cuda.empty_cache()
         tmp = torch.mm(tmp, self.Q_t.t())
-        torch.cuda.empty_cache()
         return M_t - tmp  # keep original mean
 
 
@@ -139,6 +141,26 @@ def calculate_corr(genotype_t, phenotype_t, residualizer=None, return_var=False)
 
 
 def calculate_interaction_nominal(genotypes_t, phenotypes_t, interaction_t, residualizer=None,
+                                  return_sparse=False, tstat_threshold=None, variant_ids=None, logger=None):
+    """
+    genotypes_t:   [num_genotypes x num_samples]
+    phenotypes_t:   [num_phenotypes x num_samples]
+    interaction_t: [1 x num_samples]
+    """
+    try:
+        return _calculate_interaction_nominal(genotypes_t, phenotypes_t, interaction_t, residualizer=residualizer,
+                                  return_sparse=return_sparse, tstat_threshold=tstat_threshold, variant_ids=variant_ids)
+    except RuntimeError as e:
+        if torch.cuda.is_available():
+            if logger is not None:
+                logger.write('    * WARNING: Possible OOM error? (error = {}). Temporarily falling back to CPU and retrying.'.format(e))
+            return _calculate_interaction_nominal(genotypes_t.cpu(), phenotypes_t.cpu(), interaction_t.cpu(), residualizer=residualizer.cpu() if residualizer is not None else residualizer,
+                                  return_sparse=return_sparse, tstat_threshold=tstat_threshold, variant_ids=variant_ids)
+        else:
+            raise
+
+
+def _calculate_interaction_nominal(genotypes_t, phenotypes_t, interaction_t, residualizer=None,
                                   return_sparse=False, tstat_threshold=None, variant_ids=None):
     """
     genotypes_t:   [num_genotypes x num_samples]
