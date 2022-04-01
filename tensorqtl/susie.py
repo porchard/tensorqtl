@@ -517,7 +517,7 @@ def susie(X_t, y_t, L=10, scaled_prior_variance=0.2,
             if verbose:
                 print(f'Objective (iter {i}): {get_objective(X_t, xattr, y_t, s)}')
 
-    s['elbo'] = elbo[1:i+1]  # Remove first (infinite) entry, and trailing NAs.
+    s['elbo'] = elbo[1:i+1].cpu().numpy()  # Remove first (infinite) entry, and trailing NAs.
     s['niter'] = i
 
     if 'converged' not in s:
