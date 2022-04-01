@@ -578,7 +578,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
 
     start_time = time.time()
     logger.write('  * fine-mapping')
-    copy_keys = ['pip', 'sets', 'converged', 'niter', 'lbf_variable']
+    copy_keys = ['pip', 'sets', 'converged', 'niter', 'elbo', 'lbf_variable']
     susie_res = {} # this will only be populated if not summary_only
     susie_summary = [] # this will always be populated
 
