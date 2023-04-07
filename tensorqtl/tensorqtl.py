@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--best_only', action='store_true', help='Only write lead association for each phenotype (interaction mode only)')
     parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL mode only)')
     parser.add_argument('--batch_size', type=int, default=20000, help='Batch size. Reduce this if encountering OOM errors.')
+    parser.add_argument('--invnorm', action='store_true', default=False, help='Inverse normalize phenotypes after covariate correction. Not implemented for when using --interaction.')
     parser.add_argument('--load_split', action='store_true', help='Load genotypes into memory separately for each chromosome.')
     parser.add_argument('--disable_beta_approx', action='store_true', help='Disable Beta-distribution approximation of empirical p-values (not recommended).')
     parser.add_argument('--warn_monomorphic', action='store_true', help='Warn if monomorphic variants are found.')
@@ -50,6 +51,8 @@ def main():
         raise ValueError("Output from 'cis' mode must be provided.")
     if args.interaction is not None and args.mode not in ['cis_nominal', 'trans']:
         raise ValueError("Interactions are only supported in 'cis_nominal' or 'trans' mode.")
+    if args.interaction is not None and args.invnorm:
+        raise NotImplementedError('--invnorm is not supported when using --interaction')
 
     logger = SimpleLogger(os.path.join(args.output_dir, f'{args.prefix}.tensorQTL.{args.mode}.log'))
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Running TensorQTL: {args.mode.split("_")[0]}-QTL mapping')
@@ -135,7 +138,7 @@ def main():
             res_df = cis.map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df=covariates_df,
                                  group_s=group_s, paired_covariate_df=paired_covariate_df, nperm=args.permutations,
                                  window=args.window, beta_approx=not args.disable_beta_approx, maf_threshold=maf_threshold,
-                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True)
+                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
             logger.write('  * writing output')
             if has_rpy2:
                 calculate_qvalues(res_df, fdr=args.fdr, qvalue_lambda=args.qvalue_lambda, logger=logger)
@@ -146,7 +149,7 @@ def main():
                 cis.map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, args.prefix, covariates_df=covariates_df,
                                 interaction_df=interaction_df, maf_threshold_interaction=args.maf_threshold_interaction,
                                 group_s=None, window=args.window, maf_threshold=maf_threshold, run_eigenmt=True,
-                                output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True)
+                                output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm)
                 # compute significant pairs
                 if args.cis_output is not None:
                     cis_df = pd.read_csv(args.cis_output, sep='\t', index_col=0)
@@ -167,7 +170,7 @@ def main():
                                              args.prefix, covariates_df=covariates_df,
                                              interaction_df=interaction_df, maf_threshold_interaction=args.maf_threshold_interaction,
                                              group_s=None, window=args.window, maf_threshold=maf_threshold, run_eigenmt=True,
-                                             output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True)
+                                             output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm)
                     top_df.append(chr_df)
                 if interaction_df is not None:
                     top_df = pd.concat(top_df)
@@ -179,7 +182,7 @@ def main():
             summary_df.rename(columns={'minor_allele_samples':'ma_samples', 'minor_allele_count':'ma_count'}, inplace=True)
             res_df = cis.map_independent(genotype_df, variant_df, summary_df, phenotype_df, phenotype_pos_df, covariates_df,
                                          group_s=group_s, fdr=args.fdr, nperm=args.permutations, window=args.window,
-                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True)
+                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
             logger.write('  * writing output')
             out_file = os.path.join(args.output_dir, f'{args.prefix}.cis_independent_qtl.txt.gz')
             res_df.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
@@ -194,7 +197,7 @@ def main():
             ix = phenotype_df.index[phenotype_df.index.isin(signif_df['phenotype_id'].unique())]
             summary_df, res = susie.map(genotype_df, variant_df, phenotype_df.loc[ix], phenotype_pos_df.loc[ix],
                                         covariates_df, paired_covariate_df=paired_covariate_df, maf_threshold=maf_threshold,
-                                        max_iter=500, window=args.window, summary_only=False)
+                                        max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm)
             summary_df.to_parquet(os.path.join(args.output_dir, f'{args.prefix}.SuSiE_summary.parquet'))
             with open(os.path.join(args.output_dir, f'{args.prefix}.SuSiE.pickle'), 'wb') as f:
                 pickle.dump(res, f)
@@ -215,7 +218,7 @@ def main():
         pairs_df = trans.map_trans(genotype_df, phenotype_df, covariates_df=covariates_df, interaction_s=interaction_df,
                                   return_sparse=return_sparse, pval_threshold=pval_threshold,
                                   maf_threshold=maf_threshold, batch_size=args.batch_size,
-                                  return_r2=args.return_r2, logger=logger)
+                                  return_r2=args.return_r2, logger=logger, inverse_normal_transform=args.invnorm)
 
         if variant_df is not None:
             logger.write('  * filtering out cis-QTLs (within +/-5Mb)')

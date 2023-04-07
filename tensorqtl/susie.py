@@ -549,7 +549,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
         paired_covariate_df=None, L=10, scaled_prior_variance=0.2, estimate_residual_variance=True,
         estimate_prior_variance=True, tol=1e-3, coverage=0.95, min_abs_corr=0.5,
         summary_only=True, maf_threshold=0, max_iter=100, window=1000000,
-        logger=None, verbose=True, warn_monomorphic=False):
+        logger=None, verbose=True, warn_monomorphic=False, inverse_normal_transform=False):
     """
     SuSiE fine-mapping: computes SuSiE model for all phenotypes
     """
@@ -621,7 +621,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
 
         phenotype_t = torch.tensor(phenotype, dtype=torch.float).to(device)
         genotypes_res_t = iresidualizer.transform(genotypes_t)  # variants x samples
-        phenotype_res_t = iresidualizer.transform(phenotype_t.reshape(1,-1))  # phenotypes x samples
+        phenotype_res_t = iresidualizer.transform(phenotype_t.reshape(1,-1), inverse_normal_transform=inverse_normal_transform)  # phenotypes x samples
 
         res = susie(genotypes_res_t.T, phenotype_res_t.T, L=L,
                     scaled_prior_variance=scaled_prior_variance,
