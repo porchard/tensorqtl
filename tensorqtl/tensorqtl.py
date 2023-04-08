@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--covariates', default=None, help='Covariates file, tab-delimited, covariates x samples')
     parser.add_argument('--paired_covariate', default=None, help='Single phenotype-specific covariate. Tab-delimited file, phenotypes x samples')
     parser.add_argument('--permutations', type=int, default=10000, help='Number of permutations. Default: 10000')
+    parser.add_argument('--L', type=int, default=10, help='SuSiE L. Default: 10')
     parser.add_argument('--interaction', default=None, type=str, help='Interaction term(s)')
     parser.add_argument('--cis_output', default=None, type=str, help="Output from 'cis' mode with q-values. Required for independent cis-QTL mapping.")
     parser.add_argument('--phenotype_groups', default=None, type=str, help='Phenotype groups. Header-less TSV with two columns: phenotype_id, group_id')
@@ -196,7 +197,7 @@ def main():
                 signif_df = signif_df[signif_df['qval'] <= args.fdr]
             ix = phenotype_df.index[phenotype_df.index.isin(signif_df['phenotype_id'].unique())]
             summary_df, res = susie.map(genotype_df, variant_df, phenotype_df.loc[ix], phenotype_pos_df.loc[ix],
-                                        covariates_df, paired_covariate_df=paired_covariate_df, maf_threshold=maf_threshold,
+                                        covariates_df, L=args.L, paired_covariate_df=paired_covariate_df, maf_threshold=maf_threshold,
                                         max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm)
             summary_df.to_parquet(os.path.join(args.output_dir, f'{args.prefix}.SuSiE_summary.parquet'))
             with open(os.path.join(args.output_dir, f'{args.prefix}.SuSiE.pickle'), 'wb') as f:
