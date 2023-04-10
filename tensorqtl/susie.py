@@ -646,6 +646,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
 
         if not summary_only:  # keep full results
             susie_res[phenotype_id] = {k:res[k] for k in copy_keys}
+            susie_res[phenotype_id]['L'] = L
 
     logger.write(f'  Time elapsed: {(time.time()-start_time)/60:.2f} min')
     logger.write('done.')
