@@ -225,6 +225,17 @@ def main():
             logger.write('  * filtering out cis-QTLs (within +/-5Mb)')
             pairs_df = trans.filter_cis(pairs_df, pos_dict, variant_df, window=5000000)
 
+        if args.permutations > 0:
+            logger.write('  * Running permutations')
+            permutations = trans.map_permutations(genotype_df, covariates_df, permutations=None,
+                            chr_s=None, nperms=args.permutations, maf_threshold=maf_threshold,
+                            batch_size=args.batch_size, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
+            out_file = os.path.join(args.output_dir, args.prefix+'.permutations.txt.gz')
+            permutations.to_csv(out_file, sep='\t', index=True, float_format='%.6g')
+            pickle_out_file = os.path.join(args.output_dir, args.prefix+'.permutations.pickle')
+            with open(pickle_out_file, 'wb') as f:
+                pickle.dump(permutations, f)
+
         logger.write('  * writing output')
         if not args.output_text:
             pairs_df.to_parquet(os.path.join(args.output_dir, f'{args.prefix}.trans_qtl_pairs.parquet'))
