@@ -19,7 +19,7 @@ def main():
     parser.add_argument('genotype_path', help='Genotypes in PLINK format')
     parser.add_argument('phenotype_bed', help='Phenotypes in BED format')
     parser.add_argument('prefix', help='Prefix for output file names')
-    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'cis_susie', 'trans'], help='Mapping mode. Default: cis')
+    parser.add_argument('--mode', default='cis', choices=['cis', 'cis_nominal', 'cis_independent', 'cis_susie', 'trans', 'trans_permutations'], help='Mapping mode. Default: cis')
     parser.add_argument('--covariates', default=None, help='Covariates file, tab-delimited, covariates x samples')
     parser.add_argument('--paired_covariate', default=None, help='Single phenotype-specific covariate. Tab-delimited file, phenotypes x samples')
     parser.add_argument('--permutations', type=int, default=10000, help='Number of permutations. Default: 10000')
@@ -105,7 +105,7 @@ def main():
         interaction_df = None
 
     if args.maf_threshold is None:
-        if args.mode == 'trans':
+        if args.mode == 'trans' or args.mode == 'trans_permutations':
             maf_threshold = 0.05
         else:
             maf_threshold = 0
@@ -132,7 +132,7 @@ def main():
         logger.write(f'  * loading genotype dosages' if args.dosages else f'  * loading genotypes')
         genotype_df, variant_df = genotypeio.load_genotypes(args.genotype_path, select_samples=phenotype_df.columns, dosages=args.dosages)
         if variant_df is None:
-            assert not args.mode.startswith('cis'), f"Genotype data without variant positions is only supported for mode='trans'."
+            assert args.mode == 'trans', f"Genotype data without variant positions is only supported for mode='trans'."
 
     if args.mode.startswith('cis'):
         if args.mode == 'cis':
@@ -225,23 +225,25 @@ def main():
             logger.write('  * filtering out cis-QTLs (within +/-5Mb)')
             pairs_df = trans.filter_cis(pairs_df, pos_dict, variant_df, window=5000000)
 
-        if args.permutations > 0:
-            logger.write('  * Running permutations')
-            permutations = trans.map_permutations(genotype_df, covariates_df, permutations=None,
-                            chr_s=None, nperms=args.permutations, maf_threshold=maf_threshold,
-                            batch_size=args.batch_size, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
-            out_file = os.path.join(args.output_dir, args.prefix+'.permutations.txt.gz')
-            permutations.to_csv(out_file, sep='\t', index=True, float_format='%.6g')
-            pickle_out_file = os.path.join(args.output_dir, args.prefix+'.permutations.pickle')
-            with open(pickle_out_file, 'wb') as f:
-                pickle.dump(permutations, f)
-
         logger.write('  * writing output')
         if not args.output_text:
             pairs_df.to_parquet(os.path.join(args.output_dir, f'{args.prefix}.trans_qtl_pairs.parquet'))
         else:
             out_file = os.path.join(args.output_dir, f'{args.prefix}.trans_qtl_pairs.txt.gz')
             pairs_df.to_csv(out_file, sep='\t', index=False, float_format='%.6g')
+
+    elif args.mode == 'trans_permutations':
+
+        if args.permutations > 0:
+            logger.write('  * Running permutations')
+            permutations = trans.map_permutations(genotype_df, covariates_df, permutations=None,
+                            chr_s=variant_df['chrom'], nperms=args.permutations, maf_threshold=maf_threshold,
+                            batch_size=args.batch_size, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
+            out_file = os.path.join(args.output_dir, args.prefix+'.permutations.txt.gz')
+            permutations.to_csv(out_file, sep='\t', index=True, float_format='%.6g')
+            pickle_out_file = os.path.join(args.output_dir, args.prefix+'.permutations.pickle')
+            with open(pickle_out_file, 'wb') as f:
+                pickle.dump(permutations, f)
 
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Finished mapping')
 
