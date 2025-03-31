@@ -53,7 +53,7 @@ def filter_cis(pairs_df, phenotype_pos_df, variant_df, window=5000000):
 def map_trans(genotype_df, phenotype_df, covariates_df=None, interaction_s=None,
               return_sparse=True, pval_threshold=1e-5, maf_threshold=0.05,
               alleles=2, return_r2=False, batch_size=20000,
-              logp=False, logger=None, verbose=True):
+              logp=False, logger=None, verbose=True, inverse_normal_transform=False):
     """Run trans-QTL mapping
 
     Outputs (return_sparse == True):
@@ -117,7 +117,7 @@ def map_trans(genotype_df, phenotype_df, covariates_df=None, interaction_s=None,
             genotypes_t, variant_ids, af_t = filter_maf(genotypes_t, variant_ids, maf_threshold)
             n_variants += genotypes_t.shape[0]
 
-            r_t, genotype_var_t, phenotype_var_t = calculate_corr(genotypes_t, phenotypes_t, residualizer=residualizer, return_var=True)
+            r_t, genotype_var_t, phenotype_var_t = calculate_corr(genotypes_t, phenotypes_t, residualizer=residualizer, return_var=True, inverse_normal_transform=inverse_normal_transform)
             del genotypes_t
 
             if return_sparse:
@@ -303,7 +303,7 @@ def map_trans(genotype_df, phenotype_df, covariates_df=None, interaction_s=None,
 
 def map_permutations(genotype_df, covariates_df, permutations=None,
                      chr_s=None, nperms=10000, maf_threshold=0.05,
-                     batch_size=20000, logger=None, seed=None, verbose=True):
+                     batch_size=20000, logger=None, seed=None, verbose=True, inverse_normal_transform=False):
     """
 
 
@@ -366,7 +366,7 @@ def map_permutations(genotype_df, covariates_df, permutations=None,
                 genotypes_t, _, _ = filter_maf(genotypes_t, variant_ids, maf_threshold)
                 n_variants += genotypes_t.shape[0]
 
-                r2_t = calculate_corr(genotypes_t, permutations_t, residualizer=residualizer).pow(2)
+                r2_t = calculate_corr(genotypes_t, permutations_t, residualizer=residualizer, inverse_normal_transform=inverse_normal_transform).pow(2)
                 del genotypes_t
                 m,_ = r2_t.max(0)
                 max_r2_t = torch.max(m, max_r2_t)
@@ -414,7 +414,7 @@ def map_permutations(genotype_df, covariates_df, permutations=None,
             genotypes_t, _, _ = filter_maf(genotypes_t, variant_ids, maf_threshold)
             n_variants += genotypes_t.shape[0]
 
-            r2_t = calculate_corr(genotypes_t, permutations_t, residualizer=residualizer).pow(2)
+            r2_t = calculate_corr(genotypes_t, permutations_t, residualizer=residualizer, inverse_normal_transform=inverse_normal_transform).pow(2)
             del genotypes_t
             m,_ = r2_t.max(0)
             max_r2_t = torch.max(m, max_r2_t)

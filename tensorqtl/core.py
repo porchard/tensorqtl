@@ -65,13 +65,17 @@ class Residualizer(object):
         self.Q_t, _ = torch.linalg.qr(C_t - C_t.mean(0))
         self.dof = C_t.shape[0] - 2 - C_t.shape[1]
 
-    def transform(self, M_t, center=True):
+    def transform(self, M_t, center=True, inverse_normal_transform=False):
         """Residualize rows of M wrt columns of C"""
         M0_t = M_t - M_t.mean(1, keepdim=True)
         if center:
             M0_t = M0_t - torch.mm(torch.mm(M0_t, self.Q_t), self.Q_t.t())
         else:
             M0_t = M_t - torch.mm(torch.mm(M0_t, self.Q_t), self.Q_t.t())
+        if inverse_normal_transform:
+             ranks = torch.argsort(torch.argsort(M0_t, dim=1, stable=True), dim=1, stable=True)
+             stdnorm = torch.distributions.normal.Normal(0, 1)
+             M0_t = stdnorm.icdf((ranks + 1) / (ranks.size()[1]+1))
         return M0_t
 
 
@@ -138,13 +142,13 @@ def center_normalize(M_t, dim=0):
     return N_t / torch.sqrt(torch.pow(N_t, 2).sum(dim=dim, keepdim=True))
 
 
-def calculate_corr(genotype_t, phenotype_t, residualizer=None, return_var=False):
+def calculate_corr(genotype_t, phenotype_t, residualizer=None, return_var=False, inverse_normal_transform=False):
     """Calculate correlation between normalized residual genotypes and phenotypes"""
 
     # residualize
     if residualizer is not None:
         genotype_res_t = residualizer.transform(genotype_t)  # variants x samples
-        phenotype_res_t = residualizer.transform(phenotype_t)  # phenotypes x samples
+        phenotype_res_t = residualizer.transform(phenotype_t, inverse_normal_transform=inverse_normal_transform)  # phenotypes x samples
     else:
         genotype_res_t = genotype_t
         phenotype_res_t = phenotype_t

@@ -42,6 +42,7 @@ def main():
     parser.add_argument('--output_text', action='store_true', help='Write output in txt.gz format instead of parquet (trans-QTL mode only)')
     parser.add_argument('--batch_size', type=int, default=20000, help='GPU batch size (trans-QTLs only). Reduce this if encountering OOM errors.')
     parser.add_argument('--chunk_size', default=None, help="For cis-QTL mapping, load genotypes into CPU memory in chunks of chunk_size variants, or by chromosome if chunk_size is 'chr'.")
+    parser.add_argument('--invnorm', action='store_true', default=False, help='Inverse normalize phenotypes after covariate correction. Not implemented for when using --interaction.')
     parser.add_argument('--susie_loci', default=None, help="Table (parquet or tsv) with loci to fine-map (phenotype_id, chr, pos) with mode 'trans_susie'.")
     parser.add_argument('--disable_beta_approx', action='store_true', help='Disable Beta-distribution approximation of empirical p-values (not recommended).')
     parser.add_argument('--warn_monomorphic', action='store_true', help='Warn if monomorphic variants are found.')
@@ -57,6 +58,8 @@ def main():
         raise ValueError("Output from 'cis' mode must be provided.")
     if args.interaction is not None and args.mode not in ['cis_nominal', 'trans']:
         raise ValueError("Interactions are only supported in 'cis_nominal' or 'trans' mode.")
+    if args.interaction is not None and args.invnorm:
+        raise NotImplementedError('--invnorm is not supported when using --interaction')
 
     logger = SimpleLogger(os.path.join(args.output_dir, f'{args.prefix}.tensorQTL.{args.mode}.log'))
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Running TensorQTL v{importlib.metadata.version("tensorqtl")}: {args.mode.split("_")[0]}-QTL mapping')
@@ -159,7 +162,7 @@ def main():
             res_df = cis.map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df=covariates_df,
                                  group_s=group_s, paired_covariate_df=paired_covariate_df, nperm=args.permutations,
                                  window=args.window, beta_approx=not args.disable_beta_approx, maf_threshold=maf_threshold,
-                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True)
+                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
         else:
             res_df = []
             for gt_df, var_df, p_df, p_pos_df, _ in genotypeio.generate_paired_chunks(pgr, phenotype_df, phenotype_pos_df, args.chunk_size,
@@ -167,7 +170,7 @@ def main():
                 res_df.append(cis.map_cis(gt_df, var_df, p_df, p_pos_df, covariates_df=covariates_df,
                                           group_s=group_s, paired_covariate_df=paired_covariate_df, nperm=args.permutations,
                                           window=args.window, beta_approx=not args.disable_beta_approx, maf_threshold=maf_threshold,
-                                          warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True))
+                                          warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm))
             res_df = pd.concat(res_df)
         logger.write('  * writing output')
         if has_rpy2:
@@ -181,7 +184,7 @@ def main():
                             paired_covariate_df=paired_covariate_df, interaction_df=interaction_df,
                             maf_threshold_interaction=args.maf_threshold_interaction,
                             group_s=None, window=args.window, maf_threshold=maf_threshold, run_eigenmt=True,
-                            output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True)
+                            output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm)
             # compute significant pairs
             if args.cis_output is not None:
                 cis_df = pd.read_csv(args.cis_output, sep='\t', index_col=0)
@@ -199,7 +202,7 @@ def main():
                                 paired_covariate_df=paired_covariate_df, interaction_df=interaction_df,
                                 maf_threshold_interaction=args.maf_threshold_interaction,
                                 group_s=None, window=args.window, maf_threshold=maf_threshold, run_eigenmt=True,
-                                output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True)
+                                output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm)
             chunk_files = glob.glob(os.path.join(args.output_dir, f"{args.prefix}.chunk*.cis_qtl_pairs.*.parquet"))
             if args.chunk_size == 'chr':  # remove redundant chunk ID from file names
                 for f in chunk_files:
@@ -232,14 +235,14 @@ def main():
         if args.chunk_size is None:
             res_df = cis.map_independent(genotype_df, variant_df, summary_df, phenotype_df, phenotype_pos_df, covariates_df=covariates_df,
                                          group_s=group_s, fdr=args.fdr, nperm=args.permutations, window=args.window,
-                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True)
+                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
         else:
             res_df = []
             for gt_df, var_df, p_df, p_pos_df, _ in genotypeio.generate_paired_chunks(pgr, phenotype_df, phenotype_pos_df, args.chunk_size,
                                                                                       dosages=args.dosages, verbose=True):
                 res_df.append(cis.map_independent(gt_df, var_df, summary_df, p_df, p_pos_df, covariates_df=covariates_df,
                                                   group_s=group_s, fdr=args.fdr, nperm=args.permutations, window=args.window,
-                                                  maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True))
+                                                  maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm))
             res_df = pd.concat(res_df).reset_index(drop=True)
         logger.write('  * writing output')
         out_file = os.path.join(args.output_dir, f'{args.prefix}.cis_independent_qtl.txt.gz')
@@ -258,7 +261,7 @@ def main():
         if args.chunk_size is None:
             summary_df, res = susie.map(genotype_df, variant_df, phenotype_df, phenotype_pos_df,
                                         covariates_df, paired_covariate_df=paired_covariate_df, L=args.max_effects,
-                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False)
+                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm)
         else:
             summary_df = []
             res = {}
@@ -266,7 +269,7 @@ def main():
                                                                                       dosages=args.dosages, verbose=True):
                 chunk_summary_df, chunk_res = susie.map(gt_df, var_df, p_df, p_pos_df,
                                                         covariates_df, paired_covariate_df=paired_covariate_df, L=args.max_effects,
-                                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False)
+                                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm)
                 summary_df.append(chunk_summary_df)
                 res |= chunk_res
             summary_df = pd.concat(summary_df).reset_index(drop=True)
@@ -285,7 +288,7 @@ def main():
         if args.chunk_size is None:
             assert variant_df is not None
             summary_df, res = susie.map_loci(locus_df, genotype_df, variant_df, phenotype_df, covariates_df,
-                                             maf_threshold=maf_threshold, max_iter=500, window=args.window)
+                                             maf_threshold=maf_threshold, max_iter=500, window=args.window, inverse_normal_transform=args.invnorm)
         else:
             raise NotImplementedError()
 
@@ -308,7 +311,7 @@ def main():
             pairs_df = trans.map_trans(genotype_df, phenotype_df, covariates_df=covariates_df, interaction_s=interaction_df,
                                        return_sparse=return_sparse, pval_threshold=args.pval_threshold,
                                        maf_threshold=maf_threshold, batch_size=args.batch_size,
-                                       return_r2=args.return_r2, logger=logger)
+                                       return_r2=args.return_r2, logger=logger, inverse_normal_transform=args.invnorm)
             if args.return_dense:
                 pval_df, b_df, b_se_df, af_s = pairs_df
         else:
@@ -328,7 +331,7 @@ def main():
                 pairs_df.append(trans.map_trans(gt_df, phenotype_df, covariates_df=covariates_df, interaction_s=interaction_df,
                                                 return_sparse=return_sparse, pval_threshold=args.pval_threshold,
                                                 maf_threshold=maf_threshold, batch_size=args.batch_size,
-                                                return_r2=args.return_r2, logger=logger))
+                                                return_r2=args.return_r2, logger=logger, inverse_normal_transform=args.invnorm))
             pairs_df = pd.concat(pairs_df).reset_index(drop=True)
             variant_df = pgr.variant_df
 

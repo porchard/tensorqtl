@@ -115,7 +115,7 @@ def calculate_afc(assoc_df, counts_df, genotype_df, variant_df=None, covariates_
 
     return afc_df
 
-
+# Note: invnorm not supported here.
 def calculate_replication(res_df, genotypes, phenotype_df, covariates_df=None, paired_covariate_df=None,
                           interaction_s=None, compute_pi1=False, lambda_qvalue=None, logp=False):
     """res_df: DataFrame with 'variant_id' column and phenotype IDs as index"""
