@@ -543,6 +543,18 @@ def susie(X_t, y_t, L=10, scaled_prior_variance=0.2,
         s['sets'] = susie_get_cs(s, coverage=coverage, X=X_t, min_abs_corr=min_abs_corr)
         s['pip'] = susie_get_pip(s, prune_by_cs=False, prior_tol=prior_tol).cpu().numpy()
 
+    s['alpha'] = s['alpha'].cpu().numpy()
+    s['mu'] = s['mu'].cpu().numpy()
+    s['mu2'] = s['mu2'].cpu().numpy()
+    s['fitted'] = s['fitted'].cpu().numpy()
+    s['pi'] = s['pi'].cpu().numpy()
+    s['KL'] = s['KL'].cpu().numpy()
+    s['intercept'] = s['intercept'].cpu().numpy()
+    s['Xr'] = s['Xr'].cpu().numpy()
+    s['V'] = s['V'].cpu().numpy()
+    s['lbf'] = s['lbf'].cpu().numpy()
+    s['sigma2'] = s['sigma2'].cpu().numpy()
+
     return s
 
 
@@ -663,7 +675,6 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
 
     start_time = time.time()
     logger.write('  * fine-mapping')
-    copy_keys = ['pip', 'sets', 'converged', 'elbo', 'niter', 'lbf_variable']
     susie_summary = []
     if not summary_only:
         susie_res = {}
@@ -724,7 +735,8 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
                 print(f'    * phenotype ID: {phenotype_id}')
 
         if not summary_only:  # keep full results
-            susie_res[phenotype_id] = {k:res[k] for k in copy_keys}
+            susie_res[phenotype_id] = res
+            susie_res['L'] = L
 
     logger.write(f'  Time elapsed: {(time.time()-start_time)/60:.2f} min')
     logger.write('done.')
