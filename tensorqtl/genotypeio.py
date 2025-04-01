@@ -498,7 +498,7 @@ class InputGeneratorCis(object):
 
         self.chr_variant_dfs = {c:g[['pos', 'index']] for c,g in self.variant_df.groupby('chrom')}
 
-        if pairs is not None:
+        if pairs is None:
             # check phenotypes & calculate genotype ranges
             # get genotype indexes corresponding to cis-window of each phenotype
             self.cis_ranges, drop_ids = get_cis_ranges(self.phenotype_pos_df, self.chr_variant_dfs, self.window)
