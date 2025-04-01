@@ -67,70 +67,10 @@ def calculate_cis_permutations(genotypes_t, phenotype_t, permutation_ix_t,
     return r_nominal_t[ix], std_ratio_t[ix], ix, r2_perm_t, genotypes_t[ix]
 
 
-def calculate_association(genotype_df, phenotype_s, covariates_df=None,
-                          interaction_s=None, maf_threshold_interaction=0.05,
-                          logp=False, window=1000000, verbose=True):
-    """
-    Standalone helper function for computing the association between
-    a set of genotypes and a single phenotype.
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    assert genotype_df.columns.equals(phenotype_s.index)
-
-    # copy to GPU
-    phenotype_t = torch.tensor(phenotype_s.values, dtype=torch.float).to(device)
-    genotypes_t = torch.tensor(genotype_df.values, dtype=torch.float).to(device)
-    impute_mean(genotypes_t)
-
-    dof = phenotype_s.shape[0] - 2
-
-    if covariates_df is not None:
-        assert phenotype_s.index.equals(covariates_df.index)
-        residualizer = Residualizer(torch.tensor(covariates_df.values, dtype=torch.float32).to(device))
-        dof -= covariates_df.shape[1]
-    else:
-        residualizer = None
-
-    if interaction_s is None:
-        res = calculate_cis_nominal(genotypes_t, phenotype_t, residualizer)
-        tstat, slope, slope_se, af, ma_samples, ma_count = [i.cpu().numpy() for i in res]
-        df = pd.DataFrame({
-            'pval_nominal': get_t_pval(tstat, dof, log=logp),
-            'slope': slope, 'slope_se': slope_se,
-            'tstat': tstat, 'af': af, 'ma_samples': ma_samples, 'ma_count': ma_count,
-        }, index=genotype_df.index)
-    else:
-        interaction_t = torch.tensor(interaction_s.values.reshape(1,-1), dtype=torch.float32).to(device)
-        if maf_threshold_interaction > 0:
-            mask_s = pd.Series(True, index=interaction_s.index)
-            mask_s[interaction_s.sort_values(kind='mergesort').index[:interaction_s.shape[0]//2]] = False
-            interaction_mask_t = torch.BoolTensor(mask_s.values).to(device)
-        else:
-            interaction_mask_t = None
-
-        genotypes_t, mask_t = filter_maf_interaction(genotypes_t, interaction_mask_t=interaction_mask_t,
-                                                     maf_threshold_interaction=maf_threshold_interaction)
-        res = calculate_interaction_nominal(genotypes_t, phenotype_t.unsqueeze(0), interaction_t, residualizer,
-                                            return_sparse=False)
-        tstat, b, b_se, af, ma_samples, ma_count = [i.cpu().numpy() for i in res]
-        mask = mask_t.cpu().numpy()
-        dof -= 2
-
-        df = pd.DataFrame({
-            'pval_g': get_t_pval(tstat[:,0], dof, log=logp), 'b_g': b[:,0], 'b_g_se': b_se[:,0],
-            'pval_i': get_t_pval(tstat[:,1], dof, log=logp), 'b_i': b[:,1], 'b_i_se': b_se[:,1],
-            'pval_gi': get_t_pval(tstat[:,2], dof, log=logp), 'b_gi': b[:,2], 'b_gi_se': b_se[:,2],
-            'af':af, 'ma_samples':ma_samples, 'ma_count':ma_count,
-        }, index=genotype_df.index[mask])
-    if df.index.str.startswith('chr').all():  # assume chr_pos_ref_alt_build format
-        df['position'] = df.index.map(lambda x: int(x.split('_')[1]))
-    return df
-
-
 def map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, prefix,
                 covariates_df=None, paired_covariate_df=None, maf_threshold=0, interaction_df=None, maf_threshold_interaction=0.05,
                 group_s=None, window=1000000, run_eigenmt=False, logp=False,
-                output_dir='.', write_top=True, write_stats=True, logger=None, verbose=True, inverse_normal_transform=False):
+                output_dir='.', write_top=True, write_stats=True, logger=None, verbose=True, inverse_normal_transform=False, pairs=None):
     """
     cis-QTL mapping: nominal associations for all variant-phenotype pairs
 
@@ -206,7 +146,7 @@ def map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, prefix,
                 var_dict.append((c.replace('_gi', f'_gi{i}'), c.replace('_gi', f'_g-{v}')))
         var_dict = dict(var_dict)
 
-    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window)
+    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window, pairs=pairs)
     # iterate over chromosomes
     best_assoc = []
     start_time = time.time()
@@ -218,12 +158,20 @@ def map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, prefix,
         n = 0  # number of pairs
         if group_s is None:
             for i in igc.phenotype_pos_df[igc.phenotype_pos_df['chr'] == chrom].index:
-                j = igc.cis_ranges[i]
-                n += j[1] - j[0] + 1
+                if igc.pairs is None:
+                    j = igc.cis_ranges[i]
+                    n += j[1] - j[0] + 1
+                else:
+                    j = igc.cis_indices[i]
+                    n += len(j)
         else:
             for i in igc.group_s[igc.phenotype_pos_df['chr'] == chrom].drop_duplicates().index:
-                j = igc.cis_ranges[i]
-                n += j[1] - j[0] + 1
+                if igc.pairs is None:
+                    j = igc.cis_ranges[i]
+                    n += j[1] - j[0] + 1
+                else:
+                    j = igc.cis_indices[i]
+                    n += len(j)
 
         chr_res = OrderedDict()
         chr_res['phenotype_id'] = []
@@ -258,10 +206,10 @@ def map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, prefix,
                 genotypes_t = genotypes_t[:,genotype_ix_t]
                 impute_mean(genotypes_t)
 
-                variant_ids = variant_df.index[genotype_range[0]:genotype_range[-1]+1]
-                start_distance = np.int32(variant_df['pos'].values[genotype_range[0]:genotype_range[-1]+1] - igc.phenotype_start[phenotype_id])
+                variant_ids = variant_df.index[genotype_range]
+                start_distance = np.int32(variant_df.loc[variant_ids,'pos'].values - igc.phenotype_start[phenotype_id])
                 if 'pos' not in phenotype_pos_df:
-                    end_distance = np.int32(variant_df['pos'].values[genotype_range[0]:genotype_range[-1]+1] - igc.phenotype_end[phenotype_id])
+                    end_distance = np.int32(variant_df.loc[variant_ids,'pos'].values - igc.phenotype_end[phenotype_id])
 
                 if maf_threshold > 0:
                     maf_t = calculate_maf(genotypes_t)
@@ -349,11 +297,11 @@ def map_nominal(genotype_df, variant_df, phenotype_df, phenotype_pos_df, prefix,
                 genotypes_t = genotypes_t[:,genotype_ix_t]
                 impute_mean(genotypes_t)
 
-                variant_ids = variant_df.index[genotype_range[0]:genotype_range[-1]+1]
+                variant_ids = variant_df.index[genotype_range]
                 # assuming that the TSS for all grouped phenotypes is the same
-                start_distance = np.int32(variant_df['pos'].values[genotype_range[0]:genotype_range[-1]+1] - igc.phenotype_start[phenotype_ids[0]])
+                start_distance = np.int32(variant_df.loc[variant_ids,'pos'].values - igc.phenotype_start[phenotype_id])
                 if 'pos' not in phenotype_pos_df:
-                    end_distance = np.int32(variant_df['pos'].values[genotype_range[0]:genotype_range[-1]+1] - igc.phenotype_end[phenotype_ids[0]])
+                    end_distance = np.int32(variant_df.loc[variant_ids,'pos'].values - igc.phenotype_end[phenotype_id])
 
                 if maf_threshold > 0:
                     maf_t = calculate_maf(genotypes_t)
@@ -627,7 +575,7 @@ def _process_group_permutations(buf, variant_df, start_pos, end_pos, dof, group_
 def map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df=None,
             group_s=None, paired_covariate_df=None, maf_threshold=0, beta_approx=True, nperm=10000,
             window=1000000, random_tiebreak=False, logger=None, seed=None, logp=False,
-            verbose=True, warn_monomorphic=True, inverse_normal_transform=False):
+            verbose=True, warn_monomorphic=True, inverse_normal_transform=False, pairs=None):
     """Run cis-QTL mapping"""
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -675,7 +623,7 @@ def map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_
     permutation_ix_t = torch.LongTensor(np.array([np.random.permutation(ix) for i in range(nperm)])).to(device)
 
     res_df = []
-    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window)
+    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window, pairs=pairs)
     if igc.n_phenotypes == 0:
         raise ValueError('No valid phenotypes found.')
     start_time = time.time()
@@ -782,7 +730,7 @@ def map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_
 
 def map_independent(genotype_df, variant_df, cis_df, phenotype_df, phenotype_pos_df, covariates_df=None,
                     group_s=None, maf_threshold=0, fdr=0.05, fdr_col='qval', nperm=10000, window=1000000,
-                    missing=-9, random_tiebreak=False, logger=None, seed=None, logp=False, verbose=True, inverse_normal_transform=False):
+                    missing=-9, random_tiebreak=False, logger=None, seed=None, logp=False, verbose=True, inverse_normal_transform=False, pairs=None):
     """
     Run independent cis-QTL mapping (forward-backward regression)
 
@@ -845,7 +793,7 @@ def map_independent(genotype_df, variant_df, cis_df, phenotype_df, phenotype_pos
     permutation_ix_t = torch.LongTensor(np.array([np.random.permutation(ix) for i in range(nperm)])).to(device)
 
     res_df = []
-    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window)
+    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=group_s, window=window, pairs=pairs)
     if igc.n_phenotypes == 0:
         raise ValueError('No valid phenotypes found.')
     logger.write('  * computing independent QTLs')

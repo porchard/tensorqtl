@@ -640,7 +640,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
         paired_covariate_df=None, L=10, scaled_prior_variance=0.2, estimate_residual_variance=True,
         estimate_prior_variance=True, tol=1e-3, coverage=0.95, min_abs_corr=0.5,
         summary_only=True, maf_threshold=0, max_iter=200, window=1000000,
-        logger=None, verbose=True, warn_monomorphic=False, inverse_normal_transform=False):
+        logger=None, verbose=True, warn_monomorphic=False, inverse_normal_transform=False, pairs=None):
     """
     SuSiE fine-mapping: computes SuSiE model for all phenotypes
     """
@@ -669,7 +669,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
     genotype_ix = np.array([genotype_df.columns.tolist().index(i) for i in phenotype_df.columns])
     genotype_ix_t = torch.from_numpy(genotype_ix).to(device)
 
-    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, window=window)
+    igc = genotypeio.InputGeneratorCis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, window=window, pairs=pairs)
     if igc.n_phenotypes == 0:
         raise ValueError('No valid phenotypes found.')
 
@@ -684,7 +684,7 @@ def map(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df,
         genotypes_t = genotypes_t[:,genotype_ix_t]
         impute_mean(genotypes_t)
 
-        variant_ids = variant_df.index[genotype_range[0]:genotype_range[-1]+1].rename('variant_id')
+        variant_ids = variant_df.index[genotype_range].rename('variant_id')
 
         # filter monomorphic variants
         mask_t = ~(genotypes_t == genotypes_t[:, [0]]).all(1)

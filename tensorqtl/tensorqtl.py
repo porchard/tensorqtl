@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--cis_output', default=None, type=str, help="Output from 'cis' mode with q-values. Required for independent cis-QTL mapping.")
     parser.add_argument('--phenotype_groups', default=None, type=str, help='Phenotype groups. Header-less TSV with two columns: phenotype_id, group_id')
     parser.add_argument('--window', default=1000000, type=np.int32, help='Cis-window size, in bases. Default: 1000000.')
+    parser.add_argument('--pairs', default=None, type=str, help='Path to header-less TSV with two columns: phenotype_id, variant_id. Used to restrict cis-QTL mapping to a subset of phenotype-variant ID pairs. If used, --window is ignored')
     parser.add_argument('--pval_threshold', default=1e-5, type=np.float64, help='Output only significant phenotype-variant pairs with a p-value below threshold. Default: 1e-5 for trans-QTL')
     parser.add_argument('--logp', action='store_true', help='Compute nominal p-values as -log10(P) for added precision (requires R)')
     parser.add_argument('--maf_threshold', default=0, type=np.float64, help='Include only genotypes with minor allele frequency >= maf_threshold. Default: 0')
@@ -60,6 +61,10 @@ def main():
         raise ValueError("Interactions are only supported in 'cis_nominal' or 'trans' mode.")
     if args.interaction is not None and args.invnorm:
         raise NotImplementedError('--invnorm is not supported when using --interaction')
+    if args.pairs is not None and args.chunk_size is not None:
+        raise NotImplementedError("Chunk size cannot be used with --pairs.")
+    if args.pairs is not None and 'cis' not in args.mode:
+        raise ValueError("Pairs can only be used with cis-QTL mapping.")
 
     logger = SimpleLogger(os.path.join(args.output_dir, f'{args.prefix}.tensorQTL.{args.mode}.log'))
     logger.write(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] Running TensorQTL v{importlib.metadata.version("tensorqtl")}: {args.mode.split("_")[0]}-QTL mapping')
@@ -157,12 +162,21 @@ def main():
         import pgen
         pgr = pgen.PgenReader(args.genotype_path, select_samples=phenotype_df.columns)
 
+    if args.pairs is None:
+        pairs = None
+    else:
+        pairs_df = pd.read_csv(args.pairs, sep='\t', header=None, names=['phenotype_id', 'variant_id']).drop_duplicates()
+        pairs = {phenotype: [] for phenotype in phenotype_df.index}
+        for (phenotype, variant) in zip(pairs_df['phenotype_id'], pairs_df['variant_id']):
+            pairs[phenotype].append(variant)
+
+
     if args.mode == 'cis':
         if args.chunk_size is None:
             res_df = cis.map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_df=covariates_df,
                                  group_s=group_s, paired_covariate_df=paired_covariate_df, nperm=args.permutations,
                                  window=args.window, beta_approx=not args.disable_beta_approx, maf_threshold=maf_threshold,
-                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
+                                 warn_monomorphic=args.warn_monomorphic, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm, pairs=pairs)
         else:
             res_df = []
             for gt_df, var_df, p_df, p_pos_df, _ in genotypeio.generate_paired_chunks(pgr, phenotype_df, phenotype_pos_df, args.chunk_size,
@@ -184,7 +198,7 @@ def main():
                             paired_covariate_df=paired_covariate_df, interaction_df=interaction_df,
                             maf_threshold_interaction=args.maf_threshold_interaction,
                             group_s=None, window=args.window, maf_threshold=maf_threshold, run_eigenmt=True,
-                            output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm)
+                            output_dir=args.output_dir, write_top=True, write_stats=not args.best_only, logger=logger, verbose=True, inverse_normal_transform=args.invnorm, pairs=pairs)
             # compute significant pairs
             if args.cis_output is not None:
                 cis_df = pd.read_csv(args.cis_output, sep='\t', index_col=0)
@@ -235,7 +249,7 @@ def main():
         if args.chunk_size is None:
             res_df = cis.map_independent(genotype_df, variant_df, summary_df, phenotype_df, phenotype_pos_df, covariates_df=covariates_df,
                                          group_s=group_s, fdr=args.fdr, nperm=args.permutations, window=args.window,
-                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm)
+                                         maf_threshold=maf_threshold, logger=logger, seed=args.seed, verbose=True, inverse_normal_transform=args.invnorm, pairs=pairs)
         else:
             res_df = []
             for gt_df, var_df, p_df, p_pos_df, _ in genotypeio.generate_paired_chunks(pgr, phenotype_df, phenotype_pos_df, args.chunk_size,
@@ -261,7 +275,7 @@ def main():
         if args.chunk_size is None:
             summary_df, res = susie.map(genotype_df, variant_df, phenotype_df, phenotype_pos_df,
                                         covariates_df, paired_covariate_df=paired_covariate_df, L=args.max_effects,
-                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm)
+                                        maf_threshold=maf_threshold, max_iter=500, window=args.window, summary_only=False, inverse_normal_transform=args.invnorm, pairs=pairs)
         else:
             summary_df = []
             res = {}

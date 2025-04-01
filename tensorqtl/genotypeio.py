@@ -414,6 +414,41 @@ def get_cis_ranges(phenotype_pos_df, chr_variant_dfs, window, verbose=True):
     return cis_ranges, drop_ids
 
 
+def get_cis_indices(phenotype_pos_df, chr_variant_dfs, pairs, verbose=True):
+    """
+
+    start, end indexes (inclusive)
+    """
+    # check phenotypes & calculate genotype ranges
+    # get genotype indexes corresponding to cis-window of each phenotype
+    if 'pos' in phenotype_pos_df:
+        phenotype_pos_df = phenotype_pos_df.rename(columns={'pos':'start'})
+        phenotype_pos_df['end'] = phenotype_pos_df['start']
+    phenotype_pos_dict = phenotype_pos_df.to_dict(orient='index')
+
+    drop_ids = []
+    cis_indices = {}
+    n = len(phenotype_pos_df)
+    for k, phenotype_id in enumerate(phenotype_pos_df.index, 1):
+        if verbose and (k % 1000 == 0 or k == n):
+            print(f'\r  * checking phenotypes: {k}/{n}',  end='' if k != n else None)
+
+        pos = phenotype_pos_dict[phenotype_id]
+        chrom = pos['chr']
+        if phenotype_id in pairs:
+            r = chr_variant_dfs[chrom].loc[pairs[phenotype_id],'index'].values
+            r.sort()
+        else:
+            r = []
+
+        if len(r) > 0:
+            cis_indices[phenotype_id] = r
+        else:
+            drop_ids.append(phenotype_id)
+
+    return cis_indices, drop_ids
+
+
 class InputGeneratorCis(object):
     """
     Input generator for cis-mapping
@@ -425,16 +460,18 @@ class InputGeneratorCis(object):
       phenotype_pos_df: DataFrame defining position of each phenotype, with columns ['chr', 'pos'] or ['chr', 'start', 'end']
       window:           cis-window; selects variants within +- cis-window from 'pos' (e.g., TSS for gene-based features)
                         or within [start-window, end+window] if 'start' and 'end' are present in phenotype_pos_df
+      pairs:            Dict of phenotype_id --> [variant_id_1, variant_id_2, ..., variant_id_N] pairs to test
 
     Generates: phenotype array, genotype array (2D), cis-window indices, phenotype ID
     """
-    def __init__(self, genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=None, window=1000000):
+    def __init__(self, genotype_df, variant_df, phenotype_df, phenotype_pos_df, group_s=None, window=1000000, pairs=None):
         assert (genotype_df.index == variant_df.index).all()
         assert (phenotype_df.index == phenotype_df.index.unique()).all()
         self.genotype_df = genotype_df
         self.variant_df = variant_df.copy()
         self.variant_df['index'] = np.arange(variant_df.shape[0])
         self.n_samples = phenotype_df.shape[1]
+        self.pairs = pairs
 
         # drop phenotypes without genotypes on same contig
         variant_chrs = variant_df['chrom'].unique()
@@ -461,9 +498,12 @@ class InputGeneratorCis(object):
 
         self.chr_variant_dfs = {c:g[['pos', 'index']] for c,g in self.variant_df.groupby('chrom')}
 
-        # check phenotypes & calculate genotype ranges
-        # get genotype indexes corresponding to cis-window of each phenotype
-        self.cis_ranges, drop_ids = get_cis_ranges(self.phenotype_pos_df, self.chr_variant_dfs, self.window)
+        if pairs is not None:
+            # check phenotypes & calculate genotype ranges
+            # get genotype indexes corresponding to cis-window of each phenotype
+            self.cis_ranges, drop_ids = get_cis_ranges(self.phenotype_pos_df, self.chr_variant_dfs, self.window)
+        else:
+            self.cis_indices, drop_ids = get_cis_indices(self.phenotype_pos_df, self.chr_variant_dfs, pairs, verbose=True)
         if len(drop_ids) > 0:
             print(f"    ** dropping {len(drop_ids)} phenotypes without variants in cis-window")
             self.phenotype_df = self.phenotype_df.drop(drop_ids)
@@ -507,20 +547,32 @@ class InputGeneratorCis(object):
                     print_progress(k, self.n_phenotypes, 'phenotype')
                 p = self.phenotype_df.values[index_dict[phenotype_id]]
                 # p = self.phenotype_df.values[k]
-                r = self.cis_ranges[phenotype_id]
-                yield p, self.genotype_df.values[r[0]:r[-1]+1], np.arange(r[0],r[-1]+1), phenotype_id
+                if self.pairs is None:
+                    r = self.cis_ranges[phenotype_id]
+                    yield p, self.genotype_df.values[r[0]:r[-1]+1], np.arange(r[0],r[-1]+1), phenotype_id
+                else:
+                    r = self.cis_indices[phenotype_id]
+                    yield p, self.genotype_df.values[r], r, phenotype_id
         else:
             gdf = self.group_s[phenotype_ids].groupby(self.group_s, sort=False)
             for k,(group_id,g) in enumerate(gdf, chr_offset+1):
                 if verbose:
                     print_progress(k, self.n_groups, 'phenotype group')
-                # check that ranges are the same for all phenotypes within group
-                assert np.all([self.cis_ranges[g.index[0]][0] == self.cis_ranges[i][0] and self.cis_ranges[g.index[0]][1] == self.cis_ranges[i][1] for i in g.index[1:]])
+                if self.pairs is None:
+                    # check that ranges are the same for all phenotypes within group
+                    assert np.all([self.cis_ranges[g.index[0]][0] == self.cis_ranges[i][0] and self.cis_ranges[g.index[0]][1] == self.cis_ranges[i][1] for i in g.index[1:]])
+                else:
+                    # check that indices are the same for all phenotypes within group
+                    assert np.all([all(self.cis_indices[g.index[0]] == self.cis_indices[i]) for i in g.index[1:]])
                 group_phenotype_ids = g.index.tolist()
                 # p = self.phenotype_df.loc[group_phenotype_ids].values
                 p = self.phenotype_df.values[[index_dict[i] for i in group_phenotype_ids]]
-                r = self.cis_ranges[g.index[0]]
-                yield p, self.genotype_df.values[r[0]:r[-1]+1], np.arange(r[0],r[-1]+1), group_phenotype_ids, group_id
+                if self.pairs is None:
+                    r = self.cis_ranges[g.index[0]]
+                    yield p, self.genotype_df.values[r[0]:r[-1]+1], np.arange(r[0],r[-1]+1), group_phenotype_ids, group_id
+                else:
+                    r = self.cis_indices[g.index[0]]
+                    yield p, self.genotype_df.values[r], r, group_phenotype_ids, group_id
 
 
 def get_chunk_size(memory_gb, samples):
